@@ -9,6 +9,7 @@ import { MemoryContextTab } from './components/MemoryContextTab';
 import { CircuitSchedulerTab } from './components/CircuitSchedulerTab';
 import { SessionsPlaygroundTab } from './components/SessionsPlaygroundTab';
 import { SystemLogsTab } from './components/SystemLogsTab';
+import { SystemInsightsTab } from './components/SystemInsightsTab';
 import {
   ThemeMode,
   Provider,
@@ -109,12 +110,12 @@ export default function App() {
       setHarnesses(Array.isArray(resHarn) ? resHarn : []);
       setModels(Array.isArray(resMod) ? resMod : []);
       setBundles(Array.isArray(resBund) ? resBund : []);
-      setRoles(Array.isArray(resRoles) ? resRoles : []);
-      setPrompts(Array.isArray(resPrompts) ? resPrompts : []);
-      setTasks(Array.isArray(resTasks) ? resTasks : []);
-      setInspectorDispatch(Array.isArray(resDisp) ? resDisp : []);
+      setRoles(Array.isArray(resRoles?.roles) ? resRoles.roles : Array.isArray(resRoles) ? resRoles : []);
+      setPrompts(Array.isArray(resPrompts?.prompts) ? resPrompts.prompts : Array.isArray(resPrompts) ? resPrompts : []);
+      setTasks(Array.isArray(resTasks?.tasks) ? resTasks.tasks : Array.isArray(resTasks) ? resTasks : []);
+      setInspectorDispatch(Array.isArray(resDisp?.tasks) ? resDisp.tasks : Array.isArray(resDisp) ? resDisp : []);
       if (resFail) setFailureConfig(resFail);
-      setSchedules(Array.isArray(resSched) ? resSched : []);
+      setSchedules(Array.isArray(resSched?.entries) ? resSched.entries : Array.isArray(resSched) ? resSched : []);
       setSessions(Array.isArray(resSess) ? resSess : []);
       if (resVal) setValidationReport(resVal);
     } catch (e) {
@@ -153,7 +154,7 @@ export default function App() {
   const handleSeedDefaults = async () => {
     if (confirm('Reset and re-seed default tackle configurations?')) {
       try {
-        await fetch('/config/seed', { method: 'POST' });
+        await fetch('/config/ai/seed-defaults', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: false }) });
         await fetchAllData();
       } catch (e) {
         alert('Seed error');
@@ -272,7 +273,7 @@ export default function App() {
       body: JSON.stringify(role)
     });
     const updated = await fetch('/roles').then(r => r.json());
-    setRoles(updated);
+    setRoles(Array.isArray(updated?.roles) ? updated.roles : updated);
   };
 
   const handleDeleteRole = async (id: string) => {
@@ -288,7 +289,7 @@ export default function App() {
       body: JSON.stringify(prompt)
     });
     const updated = await fetch('/prompts').then(r => r.json());
-    setPrompts(updated);
+    setPrompts(Array.isArray(updated?.prompts) ? updated.prompts : Array.isArray(updated) ? updated : []);
   };
 
   const handleSaveTask = async (task: Partial<TaskDefinition>) => {
@@ -301,8 +302,8 @@ export default function App() {
       fetch('/tasks').then(r => r.json()),
       fetch('/tasks/inspector/dispatch').then(r => r.json())
     ]);
-    setTasks(updatedTasks);
-    setInspectorDispatch(updatedDisp);
+    setTasks(Array.isArray(updatedTasks?.tasks) ? updatedTasks.tasks : Array.isArray(updatedTasks) ? updatedTasks : []);
+    setInspectorDispatch(Array.isArray(updatedDisp?.tasks) ? updatedDisp.tasks : Array.isArray(updatedDisp) ? updatedDisp : []);
   };
 
   // Failure Recovery
@@ -323,7 +324,7 @@ export default function App() {
       body: JSON.stringify(sched)
     });
     const updated = await fetch('/scheduler').then(r => r.json());
-    setSchedules(updated);
+    setSchedules(Array.isArray(updated?.entries) ? updated.entries : Array.isArray(updated) ? updated : []);
   };
 
   const handleToggleSchedule = async (id: string, enabled: boolean) => {
@@ -353,9 +354,8 @@ export default function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        role,
         model_id: modelId,
-        prompt: promptText
+        test_prompt: promptText
       })
     });
     return await res.json();
@@ -490,6 +490,10 @@ export default function App() {
 
             {currentTab === 'system-logs' && (
               <SystemLogsTab />
+            )}
+
+            {currentTab === 'system-insights' && (
+              <SystemInsightsTab initialHealthStatus={healthStatus} />
             )}
           </main>
 

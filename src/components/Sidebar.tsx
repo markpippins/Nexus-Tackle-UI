@@ -8,6 +8,7 @@ import {
   ShieldAlert,
   Play,
   FileText,
+  Activity,
   X
 } from 'lucide-react';
 
@@ -46,6 +47,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         { id: 'circuit-sched', label: 'Circuit & Scheduler', icon: ShieldAlert },
         { id: 'sessions-playground', label: 'Sessions & Playground', icon: Play },
         { id: 'system-logs', label: 'System Logs', icon: FileText },
+        { id: 'system-insights', label: 'System Insights (D3)', icon: Activity },
       ]
     }
   ];

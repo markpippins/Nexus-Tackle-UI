@@ -12,9 +12,22 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Proxy /api and /config to the real tackle-srv backend.
+      // In production (via server.ts), Express-level proxy handles this;
+      // during Vite-only dev, these rules forward requests to tackle-srv:3410.
+      proxy: {
+        '/api': {
+          target: 'http://localhost:3410',
+          changeOrigin: true,
+        },
+        '/config': {
+          target: 'http://localhost:3410',
+          changeOrigin: true,
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',
+      // Do not modify — file watching is disabled to prevent flickering during agent edits.
+      hmr: process.env.DISABLE_HMR === 'true' ? false : { port: 24679 },
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },

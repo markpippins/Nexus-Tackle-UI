@@ -188,9 +188,48 @@ export interface AISnapshot {
   bundles: ConfigBundle[];
 }
 
+export interface ValidationWarning {
+  role: string;
+  field?: string;
+  message: string;
+  severity: 'error' | 'warn' | 'info';
+}
+
 export interface ValidationReport {
   valid: boolean;
-  warnings: string[];
-  errors: string[];
-  check_timestamp: string;
+  warnings: ValidationWarning[];
+  errors?: string[];
+  check_timestamp?: string;
+}
+
+export interface SystemMetricPoint {
+  timestamp: string;
+  cpu_percent: number;
+  memory_percent: number;
+  memory_used_mb: number;
+  memory_total_mb: number;
+  active_requests: number;
+  latency_avg_ms: number;
+}
+
+export interface SystemHealthStatus {
+  status: 'ok' | 'degraded' | 'error';
+  port: number;
+  pid: number;
+  timestamp: string;
+  uptime_seconds: number;
+  cpu: {
+    usage_percent: number;
+    cores: number;
+    load_average: number[];
+  };
+  memory: {
+    used_mb: number;
+    total_mb: number;
+    usage_percent: number;
+    free_mb: number;
+    heap_used_mb: number;
+    heap_total_mb: number;
+  };
+  history: SystemMetricPoint[];
 }

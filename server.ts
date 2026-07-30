@@ -1,7 +1,11 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+import http from 'http';
+
+dotenv.config();
 import {
   INITIAL_PROVIDERS,
   INITIAL_HARNESSES,
@@ -30,7 +34,9 @@ import {
   FailureRecoveryConfig,
   AgentScheduleEntry,
   SessionLedgerEntry,
-  SystemLogEntry
+  SystemLogEntry,
+  SystemMetricPoint,
+  SystemHealthStatus
 } from './src/types';
 
 // Initialize in-memory store
@@ -71,6 +77,88 @@ function addLogEntry(
   return newLog;
 }
 
+// System Health & Telemetry History Store (1 Hour / 60 Minutes)
+const startTimeMs = Date.now();
+let systemMetricsHistory: SystemMetricPoint[] = Array.from({ length: 60 }, (_, idx) => {
+  const minAgo = 59 - idx;
+  const t = Date.now() - minAgo * 60 * 1000;
+  const angle = idx / 5.0;
+  const cpu = Math.max(12, Math.min(88, Math.round((28 + Math.sin(angle) * 16 + Math.cos(idx / 3) * 8 + (idx % 7 === 0 ? 15 : 0)) * 10) / 10));
+  const memPct = Math.max(28, Math.min(74, Math.round((41 + Math.sin(idx / 8) * 6 + (idx / 59) * 5) * 10) / 10));
+  const memUsed = Math.round((memPct / 100) * 4096 * 10) / 10;
+  const activeReq = Math.max(2, Math.round(14 + Math.sin(angle) * 8 + (idx % 11 === 0 ? 18 : 0)));
+  const latency = Math.max(8, Math.round(19 + Math.sin(idx / 6) * 12 + (cpu > 45 ? 22 : 0)));
+  return {
+    timestamp: new Date(t).toISOString(),
+    cpu_percent: cpu,
+    memory_percent: memPct,
+    memory_used_mb: memUsed,
+    memory_total_mb: 4096.0,
+    active_requests: activeReq,
+    latency_avg_ms: latency
+  };
+});
+
+function getSystemHealthData(): SystemHealthStatus {
+  const now = Date.now();
+  const lastPoint = systemMetricsHistory[systemMetricsHistory.length - 1];
+  const timeSinceLast = now - new Date(lastPoint.timestamp).getTime();
+
+  // If more than 30s have passed, append a new current data point and drop oldest
+  if (timeSinceLast >= 30000) {
+    const nextIdx = systemMetricsHistory.length;
+    const angle = nextIdx / 5.0;
+    const noise = Math.random() * 6 - 3;
+    const cpu = Math.max(10, Math.min(92, Math.round((30 + Math.sin(angle) * 15 + noise) * 10) / 10));
+    const memPct = Math.max(30, Math.min(78, Math.round((lastPoint.memory_percent + (Math.random() * 1.6 - 0.8)) * 10) / 10));
+    const memUsed = Math.round((memPct / 100) * 4096 * 10) / 10;
+    const activeReq = Math.max(3, Math.round(15 + Math.random() * 14));
+    const latency = Math.max(10, Math.round(18 + (cpu > 50 ? 25 : 0) + Math.random() * 8));
+
+    systemMetricsHistory.push({
+      timestamp: new Date(now).toISOString(),
+      cpu_percent: cpu,
+      memory_percent: memPct,
+      memory_used_mb: memUsed,
+      memory_total_mb: 4096.0,
+      active_requests: activeReq,
+      latency_avg_ms: latency
+    });
+    if (systemMetricsHistory.length > 60) {
+      systemMetricsHistory = systemMetricsHistory.slice(systemMetricsHistory.length - 60);
+    }
+  }
+
+  const latest = systemMetricsHistory[systemMetricsHistory.length - 1];
+  const uptimeSeconds = Math.round((now - startTimeMs) / 1000) + 7200; // start at 2h uptime
+
+  return {
+    status: latest.cpu_percent > 85 ? 'degraded' : 'ok',
+    port: 3410,
+    pid: process.pid || 14820,
+    timestamp: new Date(now).toISOString(),
+    uptime_seconds: uptimeSeconds,
+    cpu: {
+      usage_percent: latest.cpu_percent,
+      cores: 8,
+      load_average: [
+        Math.round((latest.cpu_percent / 20) * 100) / 100,
+        Math.round((latest.cpu_percent / 22) * 100) / 100,
+        Math.round((latest.cpu_percent / 25) * 100) / 100
+      ]
+    },
+    memory: {
+      used_mb: latest.memory_used_mb,
+      total_mb: latest.memory_total_mb,
+      usage_percent: latest.memory_percent,
+      free_mb: Math.round((latest.memory_total_mb - latest.memory_used_mb) * 10) / 10,
+      heap_used_mb: Math.round(latest.memory_used_mb * 0.28 * 10) / 10,
+      heap_total_mb: Math.round(latest.memory_total_mb * 0.35 * 10) / 10
+    },
+    history: systemMetricsHistory
+  };
+}
+
 // Lazy Gemini AI client generator
 function getGeminiClient(): GoogleGenAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -87,9 +175,43 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
+const TACKLE_MODE = (process.env.VITE_TACKLE_MODE || 'mock').toLowerCase();
+
+function createLiveProxy(targetUrl: string) {
+  const url = new URL(targetUrl);
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/@') || req.path.startsWith('/src') ||
+        req.path.startsWith('/node_modules') || req.path.startsWith('/favicon') ||
+        req.path === '/') {
+      return next();
+    }
+    console.log(`[tackle-ui -> live] ${req.method} ${req.path}`);
+    const rawBody = ['POST', 'PUT', 'PATCH'].includes(req.method) && req.body
+      ? JSON.stringify(req.body) : undefined;
+    const body = rawBody && rawBody !== '{}' ? rawBody : undefined;
+    const headers: Record<string, any> = { ...req.headers, host: `${url.hostname}:${url.port}` };
+    delete headers['content-length'];
+    if (body) headers['content-length'] = Buffer.byteLength(body).toString();
+    const proxyReq = http.request({
+      hostname: url.hostname, port: url.port,
+      path: req.originalUrl || req.url, method: req.method, headers,
+    }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+    proxyReq.on('error', (err) => {
+      console.error(`[tackle-ui -> live] proxy error: ${err.message}`);
+      if (!res.headersSent) res.status(502).json({ error: 'Tackle backend unreachable', detail: err.message });
+    });
+    proxyReq.setTimeout(30000, () => { proxyReq.destroy(); });
+    if (body) proxyReq.write(body);
+    proxyReq.end();
+  };
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '4202', 10);
 
   app.use(express.json());
 
@@ -114,6 +236,12 @@ async function startServer() {
     }
     next();
   });
+
+  if (TACKLE_MODE === 'live') {
+    const target = process.env.VITE_TACKLE_TARGET || 'http://localhost:3410';
+    console.log(`[tackle-ui] LIVE mode - proxying all requests to ${target}`);
+    app.use(createLiveProxy(target));
+  } else {
 
   // --- REST API ENDPOINTS ---
 
@@ -179,14 +307,55 @@ async function startServer() {
     res.json({ cleared: true, timestamp: new Date().toISOString() });
   });
 
-  // Health
+  // Health & System Telemetry
   app.get('/health', (req: Request, res: Response) => {
+    res.json(getSystemHealthData());
+  });
+
+  app.get('/health/history', (req: Request, res: Response) => {
+    const health = getSystemHealthData();
     res.json({
-      status: 'ok',
-      port: 3410,
-      pid: process.pid,
-      timestamp: new Date().toISOString()
+      status: health.status,
+      timestamp: health.timestamp,
+      count: health.history.length,
+      history: health.history
     });
+  });
+
+  app.get('/health/metrics', (req: Request, res: Response) => {
+    res.json(getSystemHealthData());
+  });
+
+  app.post('/health/simulate-load', (req: Request, res: Response) => {
+    const { type = 'CPU_MEMORY_SPIKE' } = req.body || {};
+    const now = Date.now();
+    const lastPoint = systemMetricsHistory[systemMetricsHistory.length - 1];
+    const cpuSpike = Math.min(96, Math.round((75 + Math.random() * 18) * 10) / 10);
+    const memSpike = Math.min(84, Math.round((lastPoint.memory_percent + 12 + Math.random() * 8) * 10) / 10);
+    const memUsed = Math.round((memSpike / 100) * 4096 * 10) / 10;
+
+    const newPoint: SystemMetricPoint = {
+      timestamp: new Date(now).toISOString(),
+      cpu_percent: cpuSpike,
+      memory_percent: memSpike,
+      memory_used_mb: memUsed,
+      memory_total_mb: 4096.0,
+      active_requests: Math.round(42 + Math.random() * 20),
+      latency_avg_ms: Math.round(65 + Math.random() * 35)
+    };
+
+    systemMetricsHistory.push(newPoint);
+    if (systemMetricsHistory.length > 60) {
+      systemMetricsHistory = systemMetricsHistory.slice(systemMetricsHistory.length - 60);
+    }
+
+    addLogEntry('WARN', 'SYSTEM', `Simulated ${type} load spike triggered by operator (CPU: ${cpuSpike}%, MEM: ${memSpike}%)`, 'operator-load-injector', {
+      cpu_percent: cpuSpike,
+      memory_percent: memSpike,
+      active_requests: newPoint.active_requests
+    });
+
+    res.json(getSystemHealthData());
   });
 
   // Snapshot / Full AI config
@@ -985,6 +1154,8 @@ async function startServer() {
 
     res.json(failureRecoveryStore);
   });
+
+  } // end mock mode block
 
   // Mount Vite or static server
   if (process.env.NODE_ENV !== 'production') {
