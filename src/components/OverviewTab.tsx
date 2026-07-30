@@ -125,17 +125,25 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                   {validationReport.valid ? 'PASSED & HEALTHY' : 'WARNINGS DETECTED'}
                 </span>
                 <span className="font-mono text-[10px] opacity-70">
-                  Checked: {new Date(validationReport.check_timestamp).toLocaleTimeString()}
+                  {validationReport.check_timestamp
+                    ? `Checked: ${new Date(validationReport.check_timestamp).toLocaleTimeString()}`
+                    : ''}
                 </span>
               </div>
               {validationReport.warnings.length > 0 && (
                 <ul className="list-disc list-inside space-y-0.5 opacity-90 text-[11px]">
                   {validationReport.warnings.map((w, idx) => (
-                    <li key={idx}>{w}</li>
+                    <li key={idx}>
+                      <span className="font-mono text-[10px] text-[var(--text-muted)]">[{w.role}]</span>{' '}
+                      {w.message}
+                      {w.severity === 'error' && (
+                        <span className="ml-1 text-[10px] font-bold text-rose-400 uppercase">ERROR</span>
+                      )}
+                    </li>
                   ))}
                 </ul>
               )}
-              {validationReport.errors.length > 0 && (
+              {validationReport.errors && validationReport.errors.length > 0 && (
                 <ul className="list-disc list-inside space-y-0.5 font-mono text-[11px] text-rose-300">
                   {validationReport.errors.map((e, idx) => (
                     <li key={idx}>{e}</li>
@@ -234,6 +242,34 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
               Resolving active bundle from tackle-srv...
             </div>
           ) : resolvedData ? (
+            resolvedData.error ? (
+              <div className="py-10 text-center space-y-2">
+                <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto" />
+                <div className="text-xs font-semibold text-[var(--text-primary)]">
+                  Resolution Error for '{selectedRole}'
+                </div>
+                <p className="text-xs text-[var(--text-secondary)] font-mono">
+                  {resolvedData.error}
+                </p>
+              </div>
+            ) : (() => {
+              // Normalize: backend returns flat shape, mock returns nested
+              const isFlat = !resolvedData.resolved_bundle;
+              const modelId = isFlat ? resolvedData.model_identifier : resolvedData.resolved_bundle?.model_id;
+              const modelName = isFlat ? resolvedData.model_identifier : resolvedData.model?.name;
+              const providerName = isFlat ? (resolvedData.provider_name || resolvedData.provider_type) : resolvedData.provider?.name;
+              const providerUrl = isFlat ? resolvedData.endpoint_url : resolvedData.provider?.endpoint_url;
+              const harnessName = isFlat ? resolvedData.harness_name : resolvedData.harness?.name;
+              const harnessProto = isFlat
+                ? (resolvedData.invocation_semantics?.execution?.mode || resolvedData.invocation_semantics?.semantics?.model?.type || 'direct')
+                : resolvedData.harness?.invocation_semantics?.protocol;
+              const bundleName = isFlat ? `${selectedRole} config` : resolvedData.resolved_bundle?.name;
+              const bundleId = isFlat ? null : resolvedData.resolved_bundle?.id;
+              const bundleMode = isFlat ? (resolvedData.invocation_semantics?.execution?.mode || 'direct') : resolvedData.resolved_bundle?.invocation_mode;
+              const bundleTimeout = isFlat ? null : resolvedData.resolved_bundle?.timeout_ms;
+              const fallbacks = isFlat ? (resolvedData.fallback_models || []) : (resolvedData.fallbacks || []);
+
+              return (
             <div className="space-y-4">
               {/* Primary Active Resolved Bundle Header */}
               <div className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-lg p-4 space-y-3">
@@ -241,25 +277,23 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                   <div>
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-sm text-[var(--text-primary)]">
-                        {resolvedData.resolved_bundle.name}
-                      </span>
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 font-bold">
-                        PRIORITY #{resolvedData.resolved_bundle.priority}
+                        {bundleName || 'Unnamed Bundle'}
                       </span>
                       <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-[var(--badge-bg)] text-[var(--accent-color)] border border-[var(--border-subtle)]">
-                        {resolvedData.resolved_bundle.invocation_mode}
+                        {bundleMode}
                       </span>
                     </div>
                     <div className="text-xs text-[var(--text-secondary)] font-mono mt-1">
-                      Bundle ID: {resolvedData.resolved_bundle.id}
+                      {bundleId ? `Bundle ID: ${bundleId}` : `Model: ${modelId}`}
                     </div>
                   </div>
-
                   <div className="text-right">
-                    <span className="text-xs font-mono text-[var(--text-muted)] flex items-center gap-1 justify-end">
-                      <Clock className="w-3 h-3" />
-                      {resolvedData.resolved_bundle.timeout_ms || 30000}ms timeout
-                    </span>
+                    {bundleTimeout && (
+                      <span className="text-xs font-mono text-[var(--text-muted)] flex items-center gap-1 justify-end">
+                        <Clock className="w-3 h-3" />
+                        {bundleTimeout}ms timeout
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -272,10 +306,10 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                       <span>Model</span>
                     </div>
                     <div className="font-bold text-xs text-[var(--text-primary)]">
-                      {resolvedData.model?.name || 'Unknown Model'}
+                      {modelName || 'Unknown Model'}
                     </div>
                     <div className="text-[10px] font-mono text-[var(--text-secondary)] truncate">
-                      {resolvedData.model?.model_identifier || resolvedData.resolved_bundle.model_id}
+                      {modelId || modelName || '—'}
                     </div>
                   </div>
 
@@ -286,11 +320,11 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                       <span>Provider</span>
                     </div>
                     <div className="font-bold text-xs text-[var(--text-primary)]">
-                      {resolvedData.provider?.name || 'Default Provider'}
+                      {providerName || 'Default Provider'}
                     </div>
                     <div className="text-[10px] font-mono text-[var(--text-secondary)] truncate flex items-center gap-1">
                       <Globe className="w-2.5 h-2.5" />
-                      {resolvedData.provider?.endpoint_url || 'Standard API'}
+                      {providerUrl || 'Standard API'}
                     </div>
                   </div>
 
@@ -301,36 +335,38 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                       <span>Harness</span>
                     </div>
                     <div className="font-bold text-xs text-[var(--text-primary)]">
-                      {resolvedData.harness?.name || 'Direct Harness'}
+                      {harnessName || 'Direct Harness'}
                     </div>
                     <div className="text-[10px] font-mono text-[var(--text-secondary)]">
-                      Protocol: {resolvedData.harness?.invocation_semantics?.protocol || 'HTTP REST'}
+                      {harnessProto ? `Mode: ${harnessProto}` : 'HTTP REST'}
                     </div>
                   </div>
                 </div>
               </div>
 
               {/* Fallback Bundles Queue */}
-              {resolvedData.fallbacks && resolvedData.fallbacks.length > 0 && (
+              {fallbacks.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider font-mono">
-                    Standby Fallback Bundles ({resolvedData.fallbacks.length})
+                    Standby Fallbacks ({fallbacks.length})
                   </div>
                   <div className="space-y-1.5">
-                    {resolvedData.fallbacks.map((fb: ConfigBundle) => (
+                    {fallbacks.map((fb: any, idx: number) => (
                       <div
-                        key={fb.id}
+                        key={fb.model_identifier || fb.id || idx}
                         className="p-2.5 rounded-md bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between text-xs"
                       >
                         <div className="flex items-center gap-2">
                           <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-[var(--bg-tertiary)] text-[var(--text-muted)] font-bold">
-                            #{fb.priority}
+                            #{fb.priority ?? idx + 2}
                           </span>
-                          <span className="font-medium text-[var(--text-primary)]">{fb.name}</span>
-                          <span className="text-[10px] font-mono text-[var(--text-muted)]">({fb.model_id})</span>
+                          <span className="font-medium text-[var(--text-primary)]">{fb.model_identifier || fb.name}</span>
+                          {fb.provider_type && (
+                            <span className="text-[10px] font-mono text-[var(--text-muted)]">via {fb.provider_type}</span>
+                          )}
                         </div>
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/40 text-amber-300 border border-amber-800/40">
-                          FALLBACK STANDBY
+                          FALLBACK
                         </span>
                       </div>
                     ))}
@@ -346,7 +382,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                     <span>Quick Test Invocation</span>
                   </span>
                   <span className="text-[11px] font-mono text-[var(--text-muted)]">
-                    Target: {resolvedData.model?.name}
+                    Target: {modelName || modelId}
                   </span>
                 </div>
 
@@ -360,7 +396,7 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                   />
                   <button
                     onClick={() => {
-                      onRunTest(selectedRole, resolvedData.model?.id || 'mod-gemini-3.6-flash', quickPrompt);
+                      onRunTest(selectedRole, modelName || modelId || 'mod-gemini-3.6-flash', quickPrompt);
                       onNavigateToTab('sessions-playground');
                     }}
                     className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--accent-color)] text-slate-950 hover:bg-[var(--accent-hover)] transition flex items-center gap-1 cursor-pointer"
@@ -371,6 +407,8 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                 </div>
               </div>
             </div>
+              );
+            })()
           ) : (
             <div className="py-10 text-center space-y-2">
               <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto" />

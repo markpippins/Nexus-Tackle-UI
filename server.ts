@@ -1,7 +1,11 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import dotenv from 'dotenv';
+import http from 'http';
+
+dotenv.config();
 import {
   INITIAL_PROVIDERS,
   INITIAL_HARNESSES,
@@ -87,9 +91,43 @@ function getGeminiClient(): GoogleGenAI | null {
   });
 }
 
+const TACKLE_MODE = (process.env.VITE_TACKLE_MODE || 'mock').toLowerCase();
+
+function createLiveProxy(targetUrl: string) {
+  const url = new URL(targetUrl);
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith('/@') || req.path.startsWith('/src') ||
+        req.path.startsWith('/node_modules') || req.path.startsWith('/favicon') ||
+        req.path === '/') {
+      return next();
+    }
+    console.log(`[tackle-ui -> live] ${req.method} ${req.path}`);
+    const rawBody = ['POST', 'PUT', 'PATCH'].includes(req.method) && req.body
+      ? JSON.stringify(req.body) : undefined;
+    const body = rawBody && rawBody !== '{}' ? rawBody : undefined;
+    const headers: Record<string, any> = { ...req.headers, host: `${url.hostname}:${url.port}` };
+    delete headers['content-length'];
+    if (body) headers['content-length'] = Buffer.byteLength(body).toString();
+    const proxyReq = http.request({
+      hostname: url.hostname, port: url.port,
+      path: req.originalUrl || req.url, method: req.method, headers,
+    }, (proxyRes) => {
+      res.writeHead(proxyRes.statusCode || 502, proxyRes.headers);
+      proxyRes.pipe(res);
+    });
+    proxyReq.on('error', (err) => {
+      console.error(`[tackle-ui -> live] proxy error: ${err.message}`);
+      if (!res.headersSent) res.status(502).json({ error: 'Tackle backend unreachable', detail: err.message });
+    });
+    proxyReq.setTimeout(30000, () => { proxyReq.destroy(); });
+    if (body) proxyReq.write(body);
+    proxyReq.end();
+  };
+}
+
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  const PORT = parseInt(process.env.PORT || '4202', 10);
 
   app.use(express.json());
 
@@ -114,6 +152,12 @@ async function startServer() {
     }
     next();
   });
+
+  if (TACKLE_MODE === 'live') {
+    const target = process.env.VITE_TACKLE_TARGET || 'http://localhost:3410';
+    console.log(`[tackle-ui] LIVE mode - proxying all requests to ${target}`);
+    app.use(createLiveProxy(target));
+  } else {
 
   // --- REST API ENDPOINTS ---
 
@@ -985,6 +1029,8 @@ async function startServer() {
 
     res.json(failureRecoveryStore);
   });
+
+  } // end mock mode block
 
   // Mount Vite or static server
   if (process.env.NODE_ENV !== 'production') {

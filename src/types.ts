@@ -188,9 +188,16 @@ export interface AISnapshot {
   bundles: ConfigBundle[];
 }
 
+export interface ValidationWarning {
+  role: string;
+  field?: string;
+  message: string;
+  severity: 'error' | 'warn' | 'info';
+}
+
 export interface ValidationReport {
   valid: boolean;
-  warnings: string[];
-  errors: string[];
-  check_timestamp: string;
+  warnings: ValidationWarning[];
+  errors?: string[];
+  check_timestamp?: string;
 }
