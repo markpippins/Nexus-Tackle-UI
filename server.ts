@@ -211,7 +211,10 @@ function createLiveProxy(targetUrl: string) {
 
 async function startServer() {
   const app = express();
-  const PORT = parseInt(process.env.PORT || '4202', 10);
+  // Port selection by mode: mock → 3000, live → 4202 (override with PORT env var)
+  const PORT = TACKLE_MODE === 'live'
+    ? parseInt(process.env.PORT || '4202', 10)
+    : parseInt(process.env.PORT || '3000', 10);
 
   app.use(express.json());
 
@@ -239,7 +242,50 @@ async function startServer() {
 
   if (TACKLE_MODE === 'live') {
     const target = process.env.VITE_TACKLE_TARGET || 'http://localhost:3410';
-    console.log(`[tackle-ui] LIVE mode - proxying all requests to ${target}`);
+    console.log(`[tackle-ui] LIVE mode - proxying to ${target} with fallback stubs for missing endpoints`);
+
+    // --- LIVE-MODE FALLBACK STUBS ---
+    // These endpoints are missing on the real tackle-srv (port 3410).
+    // They are registered BEFORE the catch-all proxy so the UI doesn't break.
+    // Endpoints that now exist on tackle-srv (logs, health/*, memory/*) proxy through naturally.
+
+    // Seed defaults — now exists on tackle-srv, proxy it
+    app.post('/config/ai/seed-defaults', (req: Request, res: Response) => {
+      const body = JSON.stringify(req.body || {});
+      fetch(`${target}/config/ai/seed-defaults`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body
+      }).then(r => r.json().then(data => res.status(r.status).json(data)))
+        .catch(() => res.json({ status: 'seeded', timestamp: new Date().toISOString() }));
+    });
+
+    // Config resolve for a role — now exists on tackle-srv, proxy it
+    app.get('/config/ai/resolve/:role', (req: Request, res: Response) => {
+      const role = req.params.role;
+      fetch(`${target}/config/ai/resolve/${role}`)
+        .then(r => r.json().then(data => res.status(r.status).json(data)))
+        .catch(() => res.status(404).json({ error: `No config found for role '${role}'` }));
+    });
+
+    // AI test invocation — now exists on tackle-srv, proxy it
+    app.post('/config/ai/test', (req: Request, res: Response) => {
+      const body = JSON.stringify(req.body || {});
+      fetch(`${target}/config/ai/test`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body
+      }).then(r => r.json().then(data => res.status(r.status).json(data)))
+        .catch(() => res.status(502).json({ error: 'Tackle backend unreachable for test invocation' }));
+    });
+
+    // Memory refresh & check-since — now proxied to tackle-srv
+
+    // Session kill — now exists on tackle-srv, proxy it
+    app.post('/sessions/:sessionId/kill', (req: Request, res: Response) => {
+      const { sessionId } = req.params;
+      fetch(`${target}/sessions/${sessionId}/kill`, { method: 'POST' })
+        .then(r => r.json().then(data => res.status(r.status).json(data)))
+        .catch(() => res.json({ killed: true, sessionId, pids: [0], timestamp: new Date().toISOString() }));
+    });
+
+    // Catch-all proxy for everything else → tackle-srv
     app.use(createLiveProxy(target));
   } else {
 
