@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Plus,
   Edit2,
@@ -27,6 +27,8 @@ interface BundlesTabProps {
   onSaveBundle: (bundle: Partial<ConfigBundle>) => Promise<void>;
   onDeleteBundle: (id: string) => Promise<void>;
   onReorderPriority: (role: string, bundleId: string, direction: 'up' | 'down') => Promise<void>;
+  prepopulatedRole?: string | null;
+  onConsumedPrepopulatedRole?: () => void;
 }
 
 export const BundlesTab: React.FC<BundlesTabProps> = ({
@@ -37,7 +39,9 @@ export const BundlesTab: React.FC<BundlesTabProps> = ({
   roles,
   onSaveBundle,
   onDeleteBundle,
-  onReorderPriority
+  onReorderPriority,
+  prepopulatedRole,
+  onConsumedPrepopulatedRole
 }) => {
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -60,6 +64,18 @@ export const BundlesTab: React.FC<BundlesTabProps> = ({
   const [formCommand, setFormCommand] = useState<string>('');
   const [formEndpoint, setFormEndpoint] = useState<string>('');
   const [formMetadataJson, setFormMetadataJson] = useState<string>('{}');
+
+  // Track whether we've consumed a prepopulated role to avoid double-open
+  const consumedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (prepopulatedRole && prepopulatedRole !== consumedRef.current) {
+      consumedRef.current = prepopulatedRole;
+      openCreateModal(prepopulatedRole);
+      onConsumedPrepopulatedRole?.();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prepopulatedRole]);
 
   const openCreateModal = (roleDefault?: string) => {
     setEditingBundle(null);
@@ -129,17 +145,29 @@ export const BundlesTab: React.FC<BundlesTabProps> = ({
       });
       setIsModalOpen(false);
     } catch (err) {
-      alert('Error saving bundle');
+      alert(`Error saving bundle: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleToggleActive = async (bundle: ConfigBundle) => {
-    await onSaveBundle({
-      ...bundle,
-      is_active: !bundle.is_active
-    });
+    try {
+      await onSaveBundle({
+        ...bundle,
+        is_active: !bundle.is_active
+      });
+    } catch (err) {
+      alert(`Error saving bundle: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleReorder = async (role: string, bundleId: string, direction: 'up' | 'down') => {
+    try {
+      await onReorderPriority(role, bundleId, direction);
+    } catch (err) {
+      alert(`Error reordering bundles: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   // Filter logic
@@ -273,7 +301,7 @@ export const BundlesTab: React.FC<BundlesTabProps> = ({
                           <div className="flex items-center gap-0.5 mt-1">
                             <button
                               disabled={idx === 0}
-                              onClick={() => onReorderPriority(roleName, bundle.id, 'up')}
+                              onClick={() => handleReorder(roleName, bundle.id, 'up')}
                               className="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-20 cursor-pointer"
                               title="Increase priority"
                             >
@@ -281,7 +309,7 @@ export const BundlesTab: React.FC<BundlesTabProps> = ({
                             </button>
                             <button
                               disabled={idx === roleBundles.length - 1}
-                              onClick={() => onReorderPriority(roleName, bundle.id, 'down')}
+                              onClick={() => handleReorder(roleName, bundle.id, 'down')}
                               className="p-0.5 text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-20 cursor-pointer"
                               title="Decrease priority"
                             >
@@ -367,9 +395,13 @@ export const BundlesTab: React.FC<BundlesTabProps> = ({
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               if (confirm(`Delete config bundle '${bundle.name}'?`)) {
-                                onDeleteBundle(bundle.id);
+                                try {
+                                  await onDeleteBundle(bundle.id);
+                                } catch (err) {
+                                  alert(`Error deleting bundle: ${err instanceof Error ? err.message : String(err)}`);
+                                }
                               }
                             }}
                             className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 rounded transition cursor-pointer"

@@ -13,35 +13,43 @@ import {
   CheckCircle,
   XCircle,
   X,
-  ShieldCheck
+  ShieldCheck,
+  Package
 } from 'lucide-react';
-import { Provider, Harness, AIModel } from '../types';
+import { Provider, Harness, AIModel, SystemRole } from '../types';
 
 interface AIRegistryTabProps {
   providers: Provider[];
   harnesses: Harness[];
   models: AIModel[];
+  roles: SystemRole[];
   onSaveProvider: (prov: Partial<Provider>) => Promise<void>;
   onDeleteProvider: (id: string) => Promise<void>;
   onSaveHarness: (harn: Partial<Harness>) => Promise<void>;
   onDeleteHarness: (id: string) => Promise<void>;
   onSaveModel: (mod: Partial<AIModel>) => Promise<void>;
   onDeleteModel: (id: string) => Promise<void>;
+  onCreateBundleForRole?: (role: string) => void;
 }
 
 export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
   providers,
   harnesses,
   models,
+  roles,
   onSaveProvider,
   onDeleteProvider,
   onSaveHarness,
   onDeleteHarness,
   onSaveModel,
-  onDeleteModel
+  onDeleteModel,
+  onCreateBundleForRole
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'providers' | 'harnesses' | 'models'>('models');
   const [showApiKeys, setShowApiKeys] = useState<Record<string, boolean>>({});
+  const [selectedRoleForBundle, setSelectedRoleForBundle] = useState<string>(
+    roles.find(r => r.name === 'engineer')?.name || roles[0]?.name || ''
+  );
 
   // Modals state
   const [provModalOpen, setProvModalOpen] = useState<boolean>(false);
@@ -101,15 +109,19 @@ export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
     } catch (e) {
       parsedConfig = {};
     }
-    await onSaveProvider({
-      id: provId,
-      name: provName,
-      type: provType,
-      endpoint_url: provEndpoint,
-      api_key: provApiKey,
-      config_json: parsedConfig
-    });
-    setProvModalOpen(false);
+    try {
+      await onSaveProvider({
+        id: provId,
+        name: provName,
+        type: provType,
+        endpoint_url: provEndpoint,
+        api_key: provApiKey,
+        config_json: parsedConfig
+      });
+      setProvModalOpen(false);
+    } catch (err) {
+      alert(`Error saving provider: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   // Harness Handlers
@@ -138,18 +150,22 @@ export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
 
   const handleSaveHarn = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSaveHarness({
-      id: harnId,
-      name: harnName,
-      invocation_semantics: {
-        supports_streaming: harnStreaming,
-        supports_function_calling: harnFunctions,
-        supports_vision: harnVision,
-        timeout_default_ms: harnTimeout,
-        protocol: harnProtocol
-      }
-    });
-    setHarnModalOpen(false);
+    try {
+      await onSaveHarness({
+        id: harnId,
+        name: harnName,
+        invocation_semantics: {
+          supports_streaming: harnStreaming,
+          supports_function_calling: harnFunctions,
+          supports_vision: harnVision,
+          timeout_default_ms: harnTimeout,
+          protocol: harnProtocol
+        }
+      });
+      setHarnModalOpen(false);
+    } catch (err) {
+      alert(`Error saving harness: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   // Model Handlers
@@ -174,14 +190,18 @@ export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
 
   const handleSaveMod = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSaveModel({
-      id: modId,
-      name: modName,
-      harness_id: modHarnessId,
-      provider_id: modProviderId || undefined,
-      model_identifier: modIdentifier
-    });
-    setModModalOpen(false);
+    try {
+      await onSaveModel({
+        id: modId,
+        name: modName,
+        harness_id: modHarnessId,
+        provider_id: modProviderId || undefined,
+        model_identifier: modIdentifier
+      });
+      setModModalOpen(false);
+    } catch (err) {
+      alert(`Error saving model: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   return (
@@ -224,33 +244,58 @@ export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
           </button>
         </div>
 
-        {activeSubTab === 'models' && (
-          <button
-            onClick={() => openModModal()}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] text-[var(--text-primary)] transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-4 h-4 text-[var(--accent-color)]" />
-            <span>Register Model</span>
-          </button>
-        )}
-        {activeSubTab === 'providers' && (
-          <button
-            onClick={() => openProvModal()}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] text-[var(--text-primary)] transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-4 h-4 text-[var(--accent-color)]" />
-            <span>Add Provider</span>
-          </button>
-        )}
-        {activeSubTab === 'harnesses' && (
-          <button
-            onClick={() => openHarnModal()}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] text-[var(--text-primary)] transition flex items-center gap-1.5 cursor-pointer"
-          >
-            <Plus className="w-4 h-4 text-[var(--accent-color)]" />
-            <span>Add Harness</span>
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {/* Quick-action: Add config bundle for a role */}
+          {onCreateBundleForRole && roles.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-[var(--bg-secondary)] border border-[var(--border-subtle)] rounded-lg px-2 py-1">
+              <select
+                value={selectedRoleForBundle}
+                onChange={e => setSelectedRoleForBundle(e.target.value)}
+                className="bg-transparent text-xs text-[var(--text-primary)] font-mono border-none outline-none cursor-pointer"
+              >
+                {roles.map(r => (
+                  <option key={r.id} value={r.name}>{r.name}</option>
+                ))}
+              </select>
+              <button
+                onClick={() => onCreateBundleForRole(selectedRoleForBundle)}
+                className="px-2.5 py-1 rounded text-[10px] font-bold bg-[var(--accent-color)] text-slate-950 hover:bg-[var(--accent-hover)] transition flex items-center gap-1 cursor-pointer shadow-sm"
+                title={`Open 'Add Config Bundle for ${selectedRoleForBundle}' dialog in Config Bundles view`}
+              >
+                <Package className="w-3 h-3" />
+                <span>Add Config Bundle</span>
+              </button>
+            </div>
+          )}
+
+          {activeSubTab === 'models' && (
+            <button
+              onClick={() => openModModal()}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] text-[var(--text-primary)] transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-[var(--accent-color)]" />
+              <span>Register Model</span>
+            </button>
+          )}
+          {activeSubTab === 'providers' && (
+            <button
+              onClick={() => openProvModal()}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] text-[var(--text-primary)] transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-[var(--accent-color)]" />
+              <span>Add Provider</span>
+            </button>
+          )}
+          {activeSubTab === 'harnesses' && (
+            <button
+              onClick={() => openHarnModal()}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[var(--bg-secondary)] hover:bg-[var(--bg-hover)] border border-[var(--border-color)] text-[var(--text-primary)] transition flex items-center gap-1.5 cursor-pointer"
+            >
+              <Plus className="w-4 h-4 text-[var(--accent-color)]" />
+              <span>Add Harness</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 1. MODELS VIEW */}
@@ -286,8 +331,14 @@ export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Delete model '${m.name}'?`)) onDeleteModel(m.id);
+                        onClick={async () => {
+                          if (confirm(`Delete model '${m.name}'?`)) {
+                            try {
+                              await onDeleteModel(m.id);
+                            } catch (err) {
+                              alert(`Error deleting model: ${err instanceof Error ? err.message : String(err)}`);
+                            }
+                          }
                         }}
                         className="p-1 text-rose-400 hover:text-rose-300 cursor-pointer"
                         title="Delete Model"
@@ -362,8 +413,14 @@ export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Delete provider '${p.name}'?`)) onDeleteProvider(p.id);
+                        onClick={async () => {
+                          if (confirm(`Delete provider '${p.name}'?`)) {
+                            try {
+                              await onDeleteProvider(p.id);
+                            } catch (err) {
+                              alert(`Error deleting provider: ${err instanceof Error ? err.message : String(err)}`);
+                            }
+                          }
                         }}
                         className="p-1.5 text-rose-400 hover:text-rose-300 cursor-pointer"
                         title="Delete Provider"
@@ -457,8 +514,14 @@ export const AIRegistryTab: React.FC<AIRegistryTabProps> = ({
                         <Edit2 className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => {
-                          if (confirm(`Delete harness '${h.name}'?`)) onDeleteHarness(h.id);
+                        onClick={async () => {
+                          if (confirm(`Delete harness '${h.name}'?`)) {
+                            try {
+                              await onDeleteHarness(h.id);
+                            } catch (err) {
+                              alert(`Error deleting harness: ${err instanceof Error ? err.message : String(err)}`);
+                            }
+                          }
                         }}
                         className="p-1.5 text-rose-400 hover:text-rose-300 cursor-pointer"
                         title="Delete Harness"

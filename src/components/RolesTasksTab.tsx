@@ -65,8 +65,12 @@ export const RolesTasksTab: React.FC<RolesTasksTabProps> = ({
   // Handlers
   const handleSaveRole = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSaveRole({ name: roleName, description: roleDesc });
-    setRoleModalOpen(false);
+    try {
+      await onSaveRole({ name: roleName, description: roleDesc });
+      setRoleModalOpen(false);
+    } catch (err) {
+      alert(`Error saving role: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const openPromptModal = (prompt?: PromptTemplate) => {
@@ -93,16 +97,20 @@ export const RolesTasksTab: React.FC<RolesTasksTabProps> = ({
   const handleSavePromptSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const tags = pTagsStr.split(',').map(s => s.trim()).filter(Boolean);
-    await onSavePrompt({
-      id: editingPrompt?.id,
-      role: pRole,
-      slug: pSlug,
-      version: pVersion,
-      title: pTitle,
-      body_md: pBodyMd,
-      tags
-    });
-    setPromptModalOpen(false);
+    try {
+      await onSavePrompt({
+        id: editingPrompt?.id,
+        role: pRole,
+        slug: pSlug,
+        version: pVersion,
+        title: pTitle,
+        body_md: pBodyMd,
+        tags
+      });
+      setPromptModalOpen(false);
+    } catch (err) {
+      alert(`Error saving prompt: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const openTaskModal = () => {
@@ -117,15 +125,19 @@ export const RolesTasksTab: React.FC<RolesTasksTabProps> = ({
   const handleSaveTaskSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const acceptance_criteria = tCriteriaStr.split('\n').map(s => s.trim()).filter(Boolean);
-    await onSaveTask({
-      role: tRole,
-      task_slug: tSlug,
-      scope: tScope,
-      acceptance_criteria,
-      prompt_id: tPromptId,
-      active: true
-    });
-    setTaskModalOpen(false);
+    try {
+      await onSaveTask({
+        role: tRole,
+        task_slug: tSlug,
+        scope: tScope,
+        acceptance_criteria,
+        prompt_id: tPromptId,
+        active: true
+      });
+      setTaskModalOpen(false);
+    } catch (err) {
+      alert(`Error saving task: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   return (
@@ -405,7 +417,13 @@ export const RolesTasksTab: React.FC<RolesTasksTabProps> = ({
                     <h4 className="font-mono font-bold text-sm text-[var(--text-primary)]">{r.name}</h4>
                   </div>
                   <button
-                    onClick={() => onDeleteRole(r.id)}
+                    onClick={async () => {
+                      try {
+                        await onDeleteRole(r.id);
+                      } catch (err) {
+                        alert(`Error deleting role: ${err instanceof Error ? err.message : String(err)}`);
+                      }
+                    }}
                     className="p-1 text-rose-400 hover:text-rose-300 cursor-pointer"
                     title="Delete Role"
                   >
