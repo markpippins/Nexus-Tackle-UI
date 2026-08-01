@@ -75,15 +75,35 @@ export const CircuitSchedulerTab: React.FC<CircuitSchedulerTabProps> = ({
 
   const handleSaveSchedSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await onSaveSchedule({
-      role: schedRole,
-      model_id: schedModelId,
-      schedule_type: schedType,
-      schedule_value: schedValue,
-      project_dir: schedProjectDir,
-      enabled: true
-    });
-    setSchedModalOpen(false);
+    try {
+      await onSaveSchedule({
+        role: schedRole,
+        model_id: schedModelId,
+        schedule_type: schedType,
+        schedule_value: schedValue,
+        project_dir: schedProjectDir,
+        enabled: true
+      });
+      setSchedModalOpen(false);
+    } catch (err) {
+      alert(`Error saving schedule: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleToggleSched = async (s: AgentScheduleEntry) => {
+    try {
+      await onToggleSchedule(s.id, !s.enabled);
+    } catch (err) {
+      alert(`Error toggling schedule: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleDeleteSched = async (id: string) => {
+    try {
+      await onDeleteSchedule(id);
+    } catch (err) {
+      alert(`Error deleting schedule: ${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   return (
@@ -258,7 +278,7 @@ export const CircuitSchedulerTab: React.FC<CircuitSchedulerTabProps> = ({
                     {s.schedule_type}: {s.schedule_value}
                   </span>
                   <button
-                    onClick={() => onToggleSchedule(s.id, !s.enabled)}
+                    onClick={() => handleToggleSched(s)}
                     className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold cursor-pointer transition ${
                       s.enabled
                         ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40'
@@ -289,7 +309,7 @@ export const CircuitSchedulerTab: React.FC<CircuitSchedulerTabProps> = ({
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={() => onDeleteSchedule(s.id)}
+                  onClick={() => handleDeleteSched(s.id)}
                   className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 rounded cursor-pointer transition"
                   title="Delete Schedule"
                 >

@@ -326,15 +326,19 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                 <div className="flex items-center gap-3">
                   {sess.status === 'running' && (
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         if (confirm(`Send SIGKILL to session '${sess.id}'?`)) {
-                          onKillSession(sess.id);
+                          try {
+                            await onKillSession(sess.id);
+                          } catch (err) {
+                            alert(`Error killing session: ${err instanceof Error ? err.message : String(err)}`);
+                          }
                         }
                       }}
                       className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-950/50 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 transition flex items-center gap-1.5 cursor-pointer"
                     >
                       <Skull className="w-3.5 h-3.5" />
-                      <span>POST /sessions/kill (SIGKILL)</span>
+                      <span>{'POST /sessions/{id}/kill (SIGKILL)'}</span>
                     </button>
                   )}
                 </div>

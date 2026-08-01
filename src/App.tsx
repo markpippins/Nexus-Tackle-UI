@@ -23,13 +23,15 @@ import {
   FailureRecoveryConfig,
   AgentScheduleEntry,
   SessionLedger,
-  ValidationReport
-} from './types';
+  ValidationReport} from './types';
+import { friendlyFetchError } from './utils/network-errors';
+import { unwrapErrorMessage, unwrapList } from './utils/response';
 
 export default function App() {
   const [theme, setTheme] = useState<ThemeMode>('steel');
   const [currentTab, setCurrentTab] = useState<string>('overview');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState<boolean>(false);
+  const [pendingBundleRole, setPendingBundleRole] = useState<string | null>(null);
 
   // Subsystem States
   const [isOnline, setIsOnline] = useState<boolean>(true);
@@ -106,17 +108,17 @@ export default function App() {
         fetch('/config/ai/validate').then(r => r.json()).catch(() => null)
       ]);
 
-      setProviders(Array.isArray(resProv) ? resProv : []);
-      setHarnesses(Array.isArray(resHarn) ? resHarn : []);
-      setModels(Array.isArray(resMod) ? resMod : []);
-      setBundles(Array.isArray(resBund) ? resBund : []);
-      setRoles(Array.isArray(resRoles?.roles) ? resRoles.roles : Array.isArray(resRoles) ? resRoles : []);
-      setPrompts(Array.isArray(resPrompts?.prompts) ? resPrompts.prompts : Array.isArray(resPrompts) ? resPrompts : []);
-      setTasks(Array.isArray(resTasks?.tasks) ? resTasks.tasks : Array.isArray(resTasks) ? resTasks : []);
-      setInspectorDispatch(Array.isArray(resDisp?.tasks) ? resDisp.tasks : Array.isArray(resDisp) ? resDisp : []);
+      setProviders(unwrapList(resProv));
+      setHarnesses(unwrapList(resHarn));
+      setModels(unwrapList(resMod));
+      setBundles(unwrapList(resBund));
+      setRoles(unwrapList(resRoles, 'roles'));
+      setPrompts(unwrapList(resPrompts, 'prompts'));
+      setTasks(unwrapList(resTasks, 'tasks'));
+      setInspectorDispatch(unwrapList(resDisp, 'tasks'));
       if (resFail) setFailureConfig(resFail);
-      setSchedules(Array.isArray(resSched?.entries) ? resSched.entries : Array.isArray(resSched) ? resSched : []);
-      setSessions(Array.isArray(resSess) ? resSess : []);
+      setSchedules(unwrapList(resSched, 'entries'));
+      setSessions(unwrapList(resSess));
       if (resVal) setValidationReport(resVal);
     } catch (e) {
       console.error('Error loading tackle state:', e);
@@ -162,26 +164,48 @@ export default function App() {
     }
   };
 
-  // Bundle CRUD Actions
-  const handleSaveBundle = async (bundle: Partial<ConfigBundle>) => {
-    const res = await fetch('/config/ai/bundle', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bundle)
-    });
-    if (res.ok) {
-      const updatedBundles = await fetch('/config/ai/bundles').then(r => r.json());
-      setBundles(updatedBundles);
-      handleValidateIntegrity();
+  // Unwrap both flat ({ error: "msg" }) and nested ({ error: { message } })
+  // error envelopes so alerts always show the real backend message.
+  const extractErrorMessage = async (res: Response): Promise<string> => {
+    const err = await res.json().catch(() => null);
+    return unwrapErrorMessage(err, `Request failed (HTTP ${res.status})`);
+  };
+
+  // Map a failed fetch (browser throws TypeError "Failed to fetch") to a
+  // friendlier message so alerts don't show a cryptic browser string when the
+  // backend is unreachable. Other errors pass through unchanged.
+  // Shared request helper — surfaces backend errors instead of silently failing.
+  // Every save/toggle/delete handler below uses it so a failed mutation shows
+  // the backend error message to the user (via the caller's alert) instead of
+  // quietly doing nothing.
+  const requestOrThrow = async (url: string, method: string, payload?: unknown) => {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: payload !== undefined ? JSON.stringify(payload) : undefined
+      });
+    } catch (e) {
+      throw friendlyFetchError(e);
+    }
+    if (!res.ok) {
+      throw new Error(await extractErrorMessage(res));
     }
   };
 
+  // Bundle CRUD Actions
+  const handleSaveBundle = async (bundle: Partial<ConfigBundle>) => {
+    await requestOrThrow('/config/ai/bundle', 'POST', bundle);
+    const updatedBundles = await fetch('/config/ai/bundles').then(r => r.json());
+    setBundles(updatedBundles);
+    handleValidateIntegrity();
+  };
+
   const handleDeleteBundle = async (id: string) => {
-    const res = await fetch(`/config/ai/bundle/${id}`, { method: 'DELETE' });
-    if (res.ok) {
-      setBundles(prev => prev.filter(b => b.id !== id));
-      handleValidateIntegrity();
-    }
+    await requestOrThrow(`/config/ai/bundle/${id}`, 'DELETE');
+    setBundles(prev => prev.filter(b => b.id !== id));
+    handleValidateIntegrity();
   };
 
   const handleReorderPriority = async (role: string, bundleId: string, direction: 'up' | 'down') => {
@@ -201,16 +225,8 @@ export default function App() {
     targetBundle.priority = tempPriority;
 
     await Promise.all([
-      fetch('/config/ai/bundle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(currentBundle)
-      }),
-      fetch('/config/ai/bundle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(targetBundle)
-      })
+      requestOrThrow('/config/ai/bundle', 'POST', currentBundle),
+      requestOrThrow('/config/ai/bundle', 'POST', targetBundle)
     ]);
 
     const updatedBundles = await fetch('/config/ai/bundles').then(r => r.json());
@@ -219,145 +235,127 @@ export default function App() {
 
   // Provider CRUD
   const handleSaveProvider = async (prov: Partial<Provider>) => {
-    await fetch('/config/ai/provider', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(prov)
-    });
+    await requestOrThrow('/config/ai/provider', 'POST', prov);
     const updated = await fetch('/config/ai/providers').then(r => r.json());
     setProviders(updated);
   };
 
   const handleDeleteProvider = async (id: string) => {
-    await fetch(`/config/ai/provider/${id}`, { method: 'DELETE' });
+    await requestOrThrow(`/config/ai/provider/${id}`, 'DELETE');
     setProviders(prev => prev.filter(p => p.id !== id));
   };
 
   // Harness CRUD
   const handleSaveHarness = async (harn: Partial<Harness>) => {
-    await fetch('/config/ai/harness', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(harn)
-    });
+    await requestOrThrow('/config/ai/harness', 'POST', harn);
     const updated = await fetch('/config/ai/harnesses').then(r => r.json());
     setHarnesses(updated);
   };
 
   const handleDeleteHarness = async (id: string) => {
-    await fetch(`/config/ai/harness/${id}`, { method: 'DELETE' });
+    await requestOrThrow(`/config/ai/harness/${id}`, 'DELETE');
     setHarnesses(prev => prev.filter(h => h.id !== id));
   };
 
   // Model CRUD
   const handleSaveModel = async (mod: Partial<AIModel>) => {
-    await fetch('/config/ai/model', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(mod)
-    });
+    await requestOrThrow('/config/ai/model', 'POST', mod);
     const updated = await fetch('/config/ai/models').then(r => r.json());
-    setModels(updated);
+    setModels(unwrapList(updated));
   };
 
   const handleDeleteModel = async (id: string) => {
-    await fetch(`/config/ai/model/${id}`, { method: 'DELETE' });
+    await requestOrThrow(`/config/ai/model/${id}`, 'DELETE');
     setModels(prev => prev.filter(m => m.id !== id));
   };
 
   // Role CRUD
   const handleSaveRole = async (role: Partial<SystemRole>) => {
-    await fetch('/roles', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(role)
-    });
+    await requestOrThrow('/roles', 'POST', role);
     const updated = await fetch('/roles').then(r => r.json());
-    setRoles(Array.isArray(updated?.roles) ? updated.roles : updated);
+    setRoles(unwrapList(updated, 'roles'));
   };
 
   const handleDeleteRole = async (id: string) => {
-    await fetch(`/roles/${id}`, { method: 'DELETE' });
+    await requestOrThrow(`/roles/${id}`, 'DELETE');
     setRoles(prev => prev.filter(r => r.id !== id));
   };
 
   // Prompt & Task CRUD
   const handleSavePrompt = async (prompt: Partial<PromptTemplate>) => {
-    await fetch('/prompts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(prompt)
-    });
+    await requestOrThrow('/prompts', 'POST', prompt);
     const updated = await fetch('/prompts').then(r => r.json());
-    setPrompts(Array.isArray(updated?.prompts) ? updated.prompts : Array.isArray(updated) ? updated : []);
+    setPrompts(unwrapList(updated, 'prompts'));
   };
 
   const handleSaveTask = async (task: Partial<TaskDefinition>) => {
-    await fetch('/tasks', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(task)
-    });
+    await requestOrThrow('/tasks', 'POST', task);
     const [updatedTasks, updatedDisp] = await Promise.all([
       fetch('/tasks').then(r => r.json()),
       fetch('/tasks/inspector/dispatch').then(r => r.json())
     ]);
-    setTasks(Array.isArray(updatedTasks?.tasks) ? updatedTasks.tasks : Array.isArray(updatedTasks) ? updatedTasks : []);
-    setInspectorDispatch(Array.isArray(updatedDisp?.tasks) ? updatedDisp.tasks : Array.isArray(updatedDisp) ? updatedDisp : []);
+    setTasks(unwrapList(updatedTasks, 'tasks'));
+    setInspectorDispatch(unwrapList(updatedDisp, 'tasks'));
   };
 
   // Failure Recovery
   const handleSaveFailureConfig = async (config: FailureRecoveryConfig) => {
-    await fetch('/config/failure-recovery', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config)
-    });
+    await requestOrThrow('/config/failure-recovery', 'POST', config);
     setFailureConfig(config);
   };
 
   // Schedule CRUD
   const handleSaveSchedule = async (sched: Partial<AgentScheduleEntry>) => {
-    await fetch('/scheduler', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sched)
-    });
+    await requestOrThrow('/scheduler', 'POST', sched);
     const updated = await fetch('/scheduler').then(r => r.json());
-    setSchedules(Array.isArray(updated?.entries) ? updated.entries : Array.isArray(updated) ? updated : []);
+    setSchedules(unwrapList(updated, 'entries'));
   };
 
   const handleToggleSchedule = async (id: string, enabled: boolean) => {
-    await fetch(`/scheduler/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled })
-    });
+    await requestOrThrow(`/scheduler/${id}`, 'PATCH', { enabled });
     setSchedules(prev => prev.map(s => (s.id === id ? { ...s, enabled } : s)));
   };
 
   const handleDeleteSchedule = async (id: string) => {
-    await fetch(`/scheduler/${id}`, { method: 'DELETE' });
+    await requestOrThrow(`/scheduler/${id}`, 'DELETE');
     setSchedules(prev => prev.filter(s => s.id !== id));
+  };
+
+  // Cross-tab: navigate from AI Registry to Bundles with role prepopulated
+  const handleCreateBundleForRole = (role: string) => {
+    setPendingBundleRole(role);
+    setCurrentTab('bundles');
+  };
+
+  const handleConsumedPrepopulatedRole = () => {
+    setPendingBundleRole(null);
   };
 
   // Kill Session
   const handleKillSession = async (sessionId: string) => {
-    await fetch(`/sessions/${sessionId}/kill`, { method: 'POST' });
+    await requestOrThrow(`/sessions/${sessionId}/kill`, 'POST');
     const updated = await fetch('/sessions').then(r => r.json());
-    setSessions(updated);
+    setSessions(unwrapList(updated));
   };
 
   // Run Test Payload
   const handleRunTest = async (role: string, modelId: string, promptText: string) => {
-    const res = await fetch('/config/ai/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model_id: modelId,
-        test_prompt: promptText
-      })
-    });
+    let res: Response;
+    try {
+      res = await fetch('/config/ai/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model_id: modelId,
+          test_prompt: promptText
+        })
+      });
+    } catch (e) {
+      throw friendlyFetchError(e);
+    }
+    if (!res.ok) {
+      throw new Error(await extractErrorMessage(res));
+    }
     return await res.json();
   };
 
@@ -411,7 +409,7 @@ export default function App() {
                 bundles={bundles}
                 validationReport={validationReport}
                 onValidate={handleValidateIntegrity}
-                onRunTest={(role, modelId, prompt) => handleRunTest(role, modelId, prompt)}
+                onRunTest={handleRunTest}
                 onSeedDefaults={handleSeedDefaults}
                 onNavigateToTab={setCurrentTab}
               />
@@ -427,6 +425,8 @@ export default function App() {
                 onSaveBundle={handleSaveBundle}
                 onDeleteBundle={handleDeleteBundle}
                 onReorderPriority={handleReorderPriority}
+                prepopulatedRole={pendingBundleRole}
+                onConsumedPrepopulatedRole={handleConsumedPrepopulatedRole}
               />
             )}
 
@@ -435,12 +435,14 @@ export default function App() {
                 providers={providers}
                 harnesses={harnesses}
                 models={models}
+                roles={roles}
                 onSaveProvider={handleSaveProvider}
                 onDeleteProvider={handleDeleteProvider}
                 onSaveHarness={handleSaveHarness}
                 onDeleteHarness={handleDeleteHarness}
                 onSaveModel={handleSaveModel}
                 onDeleteModel={handleDeleteModel}
+                onCreateBundleForRole={handleCreateBundleForRole}
               />
             )}
 

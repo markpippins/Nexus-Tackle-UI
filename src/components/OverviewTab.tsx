@@ -25,7 +25,7 @@ interface OverviewTabProps {
   bundles: ConfigBundle[];
   validationReport: ValidationReport | null;
   onValidate: () => void;
-  onRunTest: (role: string, modelId: string, prompt: string) => void;
+  onRunTest: (role: string, modelId: string, prompt: string) => void | Promise<unknown>;
   onSeedDefaults: () => void;
   onNavigateToTab: (tab: string) => void;
 }
@@ -395,8 +395,12 @@ export const OverviewTab: React.FC<OverviewTabProps> = ({
                     className="flex-1 bg-[var(--bg-primary)] border border-[var(--border-color)] rounded-lg px-3 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent-color)] font-mono"
                   />
                   <button
-                    onClick={() => {
-                      onRunTest(selectedRole, modelName || modelId || 'mod-gemini-3.6-flash', quickPrompt);
+                    onClick={async () => {
+                      try {
+                        await onRunTest(selectedRole, modelName || modelId || 'mod-gemini-3.6-flash', quickPrompt);
+                      } catch (err) {
+                        alert(`Test failed: ${err instanceof Error ? err.message : String(err)}`);
+                      }
                       onNavigateToTab('sessions-playground');
                     }}
                     className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[var(--accent-color)] text-slate-950 hover:bg-[var(--accent-hover)] transition flex items-center gap-1 cursor-pointer"
