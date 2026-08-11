@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Play,
   Skull,
@@ -14,6 +14,8 @@ import {
   BarChart2,
   Layers
 } from 'lucide-react';
+import { showToast } from '../components/Toast';
+import { showConfirm } from '../components/ConfirmDialog';
 import { SessionLedger, SystemRole, AIModel } from '../types';
 
 interface SessionsPlaygroundTabProps {
@@ -35,7 +37,20 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
 
   // Sandbox state
   const [testRole, setTestRole] = useState<string>(roles[0]?.name || 'operator');
-  const [testModelId, setTestModelId] = useState<string>(models[0]?.id || 'mod-gemini-3.6-flash');
+  // Only verified models are testable (the backend refuses unverified models
+  // with a 400) — default the selector to the first verified model.
+  const selectableModels = models.filter(m => m.verified);
+  const [testModelId, setTestModelId] = useState<string>(models.find(m => m.verified)?.id || '');
+
+  // Models load async (App.tsx fetches on mount), so the initializer above
+  // usually sees an empty list. Auto-select the first verified model once the
+  // list arrives and nothing is selected yet.
+  useEffect(() => {
+    if (!testModelId) {
+      const firstVerified = models.find(m => m.verified);
+      if (firstVerified) setTestModelId(firstVerified.id);
+    }
+  }, [models, testModelId]);
   const [promptText, setPromptText] = useState<string>(
     'Analyze the current Tackle inference configuration and output an optimized execution plan for low latency streaming.'
   );
@@ -68,7 +83,7 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
       <div className="flex items-center space-x-2 border-b border-[var(--border-color)] pb-3">
         <button
           onClick={() => setActiveSubTab('sandbox')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'sandbox'
               ? 'bg-[var(--accent-color)] text-slate-950 shadow-sm'
               : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)]'
@@ -79,7 +94,7 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
         </button>
         <button
           onClick={() => setActiveSubTab('ledger')}
-          className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 cursor-pointer ${
             activeSubTab === 'ledger'
               ? 'bg-[var(--accent-color)] text-slate-950 shadow-sm'
               : 'bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)]'
@@ -101,13 +116,13 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                 <h3 className="text-sm font-bold text-[var(--text-primary)]">
                   Live Model Execution Sandbox
                 </h3>
-                <p className="text-xs text-[var(--text-secondary)]">
+                <p className="text-sm text-[var(--text-secondary)]">
                   Send live test payloads to `/config/ai/test` using server-side Gemini SDK.
                 </p>
               </div>
             </div>
 
-            <form onSubmit={handleExecuteTest} className="space-y-4 text-xs">
+            <form onSubmit={handleExecuteTest} className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[var(--text-secondary)] mb-1 font-semibold">
@@ -135,7 +150,10 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                     onChange={e => setTestModelId(e.target.value)}
                     className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg px-3 py-2 font-mono text-[var(--text-primary)]"
                   >
-                    {models.map(m => (
+                    {selectableModels.length === 0 && (
+                      <option value="">(No verified models — verify a model first)</option>
+                    )}
+                    {selectableModels.map(m => (
                       <option key={m.id} value={m.id}>
                         {m.name}
                       </option>
@@ -154,14 +172,14 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                   value={promptText}
                   onChange={e => setPromptText(e.target.value)}
                   placeholder="Enter prompt instructions..."
-                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg p-3 font-mono text-xs text-[var(--text-primary)] leading-relaxed focus:outline-none focus:border-[var(--accent-color)]"
+                  className="w-full bg-[var(--bg-tertiary)] border border-[var(--border-color)] rounded-lg p-3 font-mono text-sm text-[var(--text-primary)] leading-relaxed focus:outline-none focus:border-[var(--accent-color)]"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={isRunningTest}
-                className="w-full py-2.5 rounded-lg font-bold text-xs bg-[var(--accent-color)] text-slate-950 hover:bg-[var(--accent-hover)] transition flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
+                className="w-full py-2.5 rounded-lg font-bold text-sm bg-[var(--accent-color)] text-slate-950 hover:bg-[var(--accent-hover)] transition flex items-center justify-center gap-2 shadow-sm cursor-pointer disabled:opacity-50"
               >
                 {isRunningTest ? (
                   <>
@@ -199,14 +217,14 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
               {isRunningTest ? (
                 <div className="py-20 text-center space-y-3">
                   <div className="w-8 h-8 rounded-full border-2 border-[var(--accent-color)] border-t-transparent animate-spin mx-auto" />
-                  <div className="text-xs font-mono text-[var(--accent-color)] animate-pulse">
+                  <div className="text-sm font-mono text-[var(--accent-color)] animate-pulse">
                     Dispatching stream roundtrip to backend server...
                   </div>
                 </div>
               ) : testResult ? (
                 <div className="space-y-3 mt-3">
                   {/* Performance stats banner */}
-                  <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+                  <div className="grid grid-cols-3 gap-2 text-sm font-mono">
                     <div className="p-2 rounded bg-[var(--bg-tertiary)] border border-[var(--border-subtle)]">
                       <div className="text-[10px] text-[var(--text-muted)]">Latency</div>
                       <div className="font-bold text-emerald-400">{testResult.latency_ms || 180} ms</div>
@@ -230,7 +248,7 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                     <span className="text-[10px] font-mono uppercase text-[var(--text-muted)]">
                       Model Generated Output
                     </span>
-                    <div className="p-3.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] font-mono text-xs text-[var(--text-primary)] leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap">
+                    <div className="p-3.5 rounded-lg bg-[var(--bg-tertiary)] border border-[var(--border-subtle)] font-mono text-sm text-[var(--text-primary)] leading-relaxed max-h-64 overflow-y-auto whitespace-pre-wrap">
                       {testResult.output || testResult.text || JSON.stringify(testResult, null, 2)}
                     </div>
                   </div>
@@ -248,7 +266,7 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                   )}
                 </div>
               ) : (
-                <div className="py-20 text-center text-xs text-[var(--text-muted)] font-mono space-y-2">
+                <div className="py-20 text-center text-sm text-[var(--text-muted)] font-mono space-y-2">
                   <Sparkles className="w-6 h-6 text-[var(--text-muted)] mx-auto opacity-40" />
                   <div>No test execution output yet.</div>
                   <p className="text-[11px] opacity-70">
@@ -269,7 +287,7 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
               <h3 className="text-sm font-bold text-[var(--text-primary)]">
                 Tackle Session Ledger (`tackle.sessions`)
               </h3>
-              <p className="text-xs text-[var(--text-secondary)]">
+              <p className="text-sm text-[var(--text-secondary)]">
                 Active worker processes, cost tracking, token usage & process termination control.
               </p>
             </div>
@@ -283,7 +301,7 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
               >
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="font-mono font-bold text-xs text-[var(--text-primary)]">
+                    <span className="font-mono font-bold text-sm text-[var(--text-primary)]">
                       Session #{sess.id}
                     </span>
 
@@ -307,7 +325,7 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                     </span>
                   </div>
 
-                  <div className="text-xs font-mono text-[var(--text-secondary)] flex items-center gap-3 flex-wrap">
+                  <div className="text-sm font-mono text-[var(--text-secondary)] flex items-center gap-3 flex-wrap">
                     <span className="flex items-center gap-1">
                       <Folder className="w-3 h-3 text-[var(--text-muted)]" />
                       {sess.project_dir}
@@ -327,15 +345,15 @@ export const SessionsPlaygroundTab: React.FC<SessionsPlaygroundTabProps> = ({
                   {sess.status === 'running' && (
                     <button
                       onClick={async () => {
-                        if (confirm(`Send SIGKILL to session '${sess.id}'?`)) {
+                        if (await showConfirm(`Send SIGKILL to session '${sess.id}'?`)) {
                           try {
                             await onKillSession(sess.id);
                           } catch (err) {
-                            alert(`Error killing session: ${err instanceof Error ? err.message : String(err)}`);
+                            showToast(`Error killing session: ${err instanceof Error ? err.message : String(err)}`);
                           }
                         }
                       }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-rose-950/50 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 transition flex items-center gap-1.5 cursor-pointer"
+                      className="px-3 py-1.5 rounded-lg text-sm font-bold bg-rose-950/50 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 transition flex items-center gap-1.5 cursor-pointer"
                     >
                       <Skull className="w-3.5 h-3.5" />
                       <span>{'POST /sessions/{id}/kill (SIGKILL)'}</span>

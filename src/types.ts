@@ -33,6 +33,8 @@ export interface AIModel {
   harness_id: string;
   provider_id?: string;
   model_identifier: string; // e.g. gemini-3.6-flash, gpt-4o, claude-3-7-sonnet
+  /** true when the model has been exercised through a harness successfully — only verified models may be selected in dropdowns or enter the resolver queue. */
+  verified?: boolean;
   created_at?: string;
   updated_at?: string;
 }
@@ -124,6 +126,7 @@ export interface ProcedureCard {
   slug: string;
   title: string;
   category: string;
+  summary?: string;
   steps: string[];
   recovery_action?: string;
   as_of_dt: string;
@@ -148,6 +151,7 @@ export interface AgentScheduleEntry {
   schedule_type: 'cron' | 'interval' | 'manual';
   schedule_value: string; // e.g., '0 */2 * * *' or '15m'
   project_dir?: string;
+  task_slug?: string | null; // optional linked tackle.tasks task — its prompt is appended to the role persona at run time (null = explicitly none)
   enabled: boolean;
   last_run_at?: string;
   next_run_at?: string;
